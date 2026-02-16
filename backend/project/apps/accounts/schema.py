@@ -11,7 +11,7 @@ class UserType(DjangoObjectType):
 
 
 class SignupPayload(graphene.ObjectType):
-    token = graphene.String(required=True)
+    access_token = graphene.String(required=True)
     user = graphene.Field(UserType, required=True)
 
 
@@ -26,14 +26,42 @@ class Signup(graphene.Mutation):
 
     @staticmethod
     def mutate(root, info, first_name, last_name, email, password):
-        user, token = service.create_user(
+        user, access_token, refresh_token = service.create_user(
             first_name,
             last_name,
             email,
             password
         )
-        return SignupPayload(token=token, user=user)
+        # Attach refresh token to the context to be picked up by middleware
+        info.context.refresh_token = refresh_token
+        
+        return SignupPayload(
+            access_token=access_token,
+            user=user
+        )
+
+
+class RefreshTokenPayload(graphene.ObjectType):
+    access_token = graphene.String(required=True)
+
+
+class RefreshTokenMutation(graphene.Mutation):
+    Output = RefreshTokenPayload
+
+    @staticmethod
+    def mutate(root, info):
+        refresh_token = info.context.COOKIES.get('refresh_token')
+        if not refresh_token:
+            raise Exception("Refresh token not found in cookies.")
+
+        access_token, new_refresh_token = service.refresh_access_token(refresh_token)
+
+        # Attach new refresh token to context for middleware to set cookie
+        info.context.refresh_token = new_refresh_token
+
+        return RefreshTokenPayload(access_token=access_token)
 
 
 class Mutation(graphene.ObjectType):
     signup = Signup.Field()
+    refresh_token = RefreshTokenMutation.Field()
